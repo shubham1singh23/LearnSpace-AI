@@ -1,0 +1,16 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+.npm-cache/
+.cache/
+data/*
+!data/.gitkeep
+apps/api/src/generated/
+*.log
+*.tsbuildinfo
+test-results/
+playwright-report/
+.DS_Store

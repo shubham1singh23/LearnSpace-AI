@@ -1,0 +1,291 @@
+generator client {
+  provider = "prisma-client"
+  output = "../apps/api/src/generated/prisma"
+  moduleFormat = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Course {
+  id String @id @default(uuid()) @db.Uuid
+  title String @db.VarChar(240)
+  goal String @db.Text
+  preferences Json @db.JsonB
+  treeRevision Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  topics Topic[]
+  assets Asset[]
+  operations AiOperation[]
+  exportLease ExportLease?
+  @@map("courses")
+}
+
+model Topic {
+  id String @id @default(uuid()) @db.Uuid
+  courseId String @db.Uuid
+  parentId String? @db.Uuid
+  title String @db.VarChar(240)
+  kind String @db.VarChar(20)
+  position Int
+  objectives Json @db.JsonB
+  course Course @relation(fields:[courseId], references:[id], onDelete:Cascade)
+  parent Topic? @relation("Tree", fields:[parentId, courseId], references:[id, courseId], onDelete:Cascade)
+  children Topic[] @relation("Tree")
+  lesson Lesson?
+  progress LearningProgress?
+  dependencies TopicPrerequisite[] @relation("Dependent")
+  requiredBy TopicPrerequisite[] @relation("Required")
+  operations AiOperation[]
+  @@unique([id, courseId])
+  @@index([courseId, parentId, position])
+  @@map("topics")
+}
+
+model TopicPrerequisite {
+  topicId String @db.Uuid
+  prerequisiteId String @db.Uuid
+  courseId String @db.Uuid
+  choice String @default("undecided") @db.VarChar(20)
+  topic Topic @relation("Dependent", fields:[topicId, courseId], references:[id, courseId], onDelete:Cascade)
+  prerequisite Topic @relation("Required", fields:[prerequisiteId, courseId], references:[id, courseId], onDelete:Cascade)
+  @@id([topicId, prerequisiteId])
+  @@index([prerequisiteId])
+  @@map("topic_prerequisites")
+}
+
+model Lesson {
+  id String @id @default(uuid()) @db.Uuid
+  topicId String @unique @db.Uuid
+  document Json @db.JsonB
+  documentSchemaVersion Int @default(1)
+  revision Int @default(1)
+  contentHash String @db.VarChar(64)
+  source String @default("manual") @db.VarChar(30)
+  operationId String? @db.Uuid
+  restoredFromRevision Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  topic Topic @relation(fields:[topicId], references:[id], onDelete:Cascade)
+  versions DocumentVersion[]
+  messages ChatMessage[]
+  assets LessonAsset[]
+  mutations LessonMutation[]
+  operation AiOperation? @relation("ProducedLesson", fields:[operationId], references:[id], onDelete:SetNull)
+  operations AiOperation[] @relation("OperationLesson")
+  @@map("lessons")
+}
+
+model DocumentVersion {
+  id String @id @default(uuid()) @db.Uuid
+  lessonId String @db.Uuid
+  revision Int
+  document Json @db.JsonB
+  documentSchemaVersion Int
+  contentHash String @db.VarChar(64)
+  source String @db.VarChar(30)
+  operationId String? @db.Uuid
+  restoredFromRevision Int?
+  createdAt DateTime @default(now())
+  lesson Lesson @relation(fields:[lessonId], references:[id], onDelete:Cascade)
+  assets VersionAsset[]
+  operation AiOperation? @relation(fields:[operationId], references:[id], onDelete:SetNull)
+  @@unique([lessonId, revision])
+  @@index([lessonId, createdAt])
+  @@map("document_versions")
+}
+
+model LessonMutation {
+  lessonId String @db.Uuid
+  mutationId String @db.Uuid
+  requestHash String @db.VarChar(64)
+  resultingRevision Int
+  resultingUpdatedAt DateTime
+  resultingContentHash String @db.VarChar(64)
+  createdAt DateTime @default(now())
+  lesson Lesson @relation(fields:[lessonId], references:[id], onDelete:Cascade)
+  @@id([lessonId, mutationId])
+  @@map("lesson_mutations")
+}
+
+model ChatMessage {
+  id String @id @default(uuid()) @db.Uuid
+  lessonId String @db.Uuid
+  role String @db.VarChar(16)
+  content String @db.Text
+  sequence Int
+  turnId String @db.Uuid
+  operationId String? @db.Uuid
+  status String @db.VarChar(20)
+  contextRevision Int?
+  createdAt DateTime @default(now())
+  lesson Lesson @relation(fields:[lessonId], references:[id], onDelete:Cascade)
+  operation AiOperation? @relation(fields:[operationId], references:[id], onDelete:SetNull)
+  @@unique([lessonId, sequence])
+  @@unique([turnId, role])
+  @@index([lessonId, createdAt])
+  @@map("chat_messages")
+}
+
+model LearningProgress {
+  topicId String @id @db.Uuid
+  status String @default("not_started") @db.VarChar(20)
+  completedAt DateTime?
+  updatedAt DateTime @updatedAt
+  topic Topic @relation(fields:[topicId], references:[id], onDelete:Cascade)
+  @@map("learning_progress")
+}
+
+model Asset {
+  id String @id @default(uuid()) @db.Uuid
+  courseId String @db.Uuid
+  storageKey String @unique @db.VarChar(200)
+  originalName String @db.VarChar(240)
+  mimeType String @db.VarChar(80)
+  bytes Int
+  width Int
+  height Int
+  sha256 String @db.VarChar(64)
+  source String @db.VarChar(20)
+  state String @db.VarChar(20)
+  createdAt DateTime @default(now())
+  course Course @relation(fields:[courseId], references:[id], onDelete:Cascade)
+  lessons LessonAsset[]
+  versions VersionAsset[]
+  exports ExportAsset[]
+  @@index([courseId, state])
+  @@map("assets")
+}
+
+model LessonAsset {
+  lessonId String @db.Uuid
+  assetId String @db.Uuid
+  lesson Lesson @relation(fields:[lessonId], references:[id], onDelete:Cascade)
+  asset Asset @relation(fields:[assetId], references:[id], onDelete:Restrict)
+  @@id([lessonId, assetId])
+  @@index([assetId])
+  @@map("lesson_assets")
+}
+
+model VersionAsset {
+  versionId String @db.Uuid
+  assetId String @db.Uuid
+  version DocumentVersion @relation(fields:[versionId], references:[id], onDelete:Cascade)
+  asset Asset @relation(fields:[assetId], references:[id], onDelete:Restrict)
+  @@id([versionId, assetId])
+  @@index([assetId])
+  @@map("version_assets")
+}
+
+model AiOperation {
+  id String @id @default(uuid()) @db.Uuid
+  courseId String? @db.Uuid
+  topicId String? @db.Uuid
+  lessonId String? @db.Uuid
+  providerConfigId String? @db.Uuid
+  kind String @db.VarChar(30)
+  status String @db.VarChar(20)
+  scopeKey String @db.VarChar(200)
+  idempotencyKey String @db.Uuid
+  requestHash String @db.VarChar(64)
+  baseRevision Int?
+  baseTreeRevision Int?
+  retryOfOperationId String? @db.Uuid
+  target Json? @db.JsonB
+  contextManifest Json? @db.JsonB
+  result Json? @db.JsonB
+  modelSnapshot Json @db.JsonB
+  promptVersion String @db.VarChar(40)
+  ownerToken String? @db.Uuid
+  leaseUntil DateTime?
+  errorCode String? @db.VarChar(60)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  usage ModelUsage[]
+  course Course? @relation(fields:[courseId], references:[id], onDelete:Cascade)
+  topic Topic? @relation(fields:[topicId], references:[id], onDelete:Cascade)
+  lesson Lesson? @relation("OperationLesson", fields:[lessonId], references:[id], onDelete:Cascade)
+  providerConfig AiProviderConfiguration? @relation(fields:[providerConfigId], references:[id], onDelete:SetNull)
+  retryOf AiOperation? @relation("Retry", fields:[retryOfOperationId], references:[id], onDelete:SetNull)
+  retries AiOperation[] @relation("Retry")
+  producedLessons Lesson[] @relation("ProducedLesson")
+  versions DocumentVersion[]
+  messages ChatMessage[]
+  @@index([courseId])
+  @@index([topicId])
+  @@index([providerConfigId])
+  @@index([retryOfOperationId])
+  @@unique([scopeKey, idempotencyKey])
+  @@index([status, leaseUntil])
+  @@index([lessonId, createdAt])
+  @@map("ai_operations")
+}
+
+model AiProviderConfiguration {
+  id String @id @default(uuid()) @db.Uuid
+  purpose String @db.VarChar(16)
+  provider String @db.VarChar(30)
+  modelId String @db.VarChar(160)
+  options Json @db.JsonB
+  credentialSource String @db.VarChar(16)
+  credentialEnvName String? @db.VarChar(80)
+  capabilities Json @db.JsonB
+  registryVersion String @db.VarChar(40)
+  revision Int @default(1)
+  updatedAt DateTime @updatedAt
+  operations AiOperation[]
+  textDefaults WorkspaceSettings[] @relation("TextDefault")
+  imageDefaults WorkspaceSettings[] @relation("ImageDefault")
+  @@map("ai_provider_configurations")
+}
+
+model WorkspaceSettings {
+  id Int @id @default(1)
+  preferences Json @db.JsonB
+  textConfigId String? @db.Uuid
+  imageConfigId String? @db.Uuid
+  textConfig AiProviderConfiguration? @relation("TextDefault", fields:[textConfigId], references:[id], onDelete:SetNull)
+  imageConfig AiProviderConfiguration? @relation("ImageDefault", fields:[imageConfigId], references:[id], onDelete:SetNull)
+  @@map("workspace_settings")
+}
+
+model ModelUsage {
+  id String @id @default(uuid()) @db.Uuid
+  operationId String @db.Uuid
+  provider String @db.VarChar(30)
+  modelId String @db.VarChar(160)
+  attempt Int
+  inputTokens Int?
+  outputTokens Int?
+  estimated Boolean @default(false)
+  durationMs Int
+  outcome String @db.VarChar(20)
+  createdAt DateTime @default(now())
+  operation AiOperation @relation(fields:[operationId], references:[id], onDelete:Cascade)
+  @@unique([operationId, attempt])
+  @@map("model_usage")
+}
+
+model ExportLease {
+  id String @id @default(uuid()) @db.Uuid
+  courseId String @unique @db.Uuid
+  ownerToken String @db.Uuid
+  expiresAt DateTime
+  assets ExportAsset[]
+  course Course @relation(fields:[courseId], references:[id], onDelete:Restrict)
+  @@index([expiresAt])
+  @@map("export_leases")
+}
+
+model ExportAsset {
+  leaseId String @db.Uuid
+  assetId String @db.Uuid
+  lease ExportLease @relation(fields:[leaseId], references:[id], onDelete:Cascade)
+  asset Asset @relation(fields:[assetId], references:[id], onDelete:Restrict)
+  @@id([leaseId, assetId])
+  @@index([assetId])
+  @@map("export_assets")
+}
