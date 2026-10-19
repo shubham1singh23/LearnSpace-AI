@@ -1,8 +1,8 @@
 # LearnSpace AI
 
-A local-first learning platform under active development. **Milestone 1 implements the foundation only:** a React dashboard shell, loopback Express API, shared Zod contracts, PostgreSQL/Prisma schema, sample syllabus seed, tests and CI. Course management, AI, the lesson editor, chat and exports are not implemented.
+A local-first learning platform under active development. **Milestone 2 implements a persistent manual workspace:** course/topic/prerequisite management, Tiptap notes, raster uploads, sequential autosave, conflict recovery, and version history. AI, chat, exports, and authentication are not implemented.
 
-The dashboard checks the real API/database connection. It does **not** load the seeded course yet; its course area is an explicit placeholder. Seeding adds hierarchy/objectives only, with no lesson documents or AI calls.
+The workspace loads real courses and their arbitrary nested topic trees. Select a leaf and choose **Create blank notes**. Seeding adds hierarchy/objectives only, with no lesson documents or AI calls. Use **Wrap topic** to add a container above a leaf with notes while retaining its identity.
 
 ## Requirements
 
@@ -52,6 +52,7 @@ Set NODE_ENV=production in `.env`, then `npm start`. Open **http://127.0.0.1:300
 | `npm run typecheck` / `npm run lint` | TypeScript / ESLint checks |
 | `npm test` / `npm run test:unit` | Contracts, configuration and API boundary tests |
 | `npm run test:integration` | Real PostgreSQL tests, requires TEST_DATABASE_URL |
+| `npm run test:e2e` | Chromium tests against built SPA/API and TEST_DATABASE_URL |
 | `npm run check` | Prisma validation, lint, typecheck, unit tests and builds |
 | `npm run db:generate` / `npm run db:validate` | Generate client / validate schema |
 | `npm run db:migrate` / `npm run db:status` | Apply committed migrations / inspect status |
@@ -92,6 +93,18 @@ Remove-Item Env:TEST_DATABASE_URL
 
 Those session environment values override `.env`; removing them restores normal `.env` configuration on the next run. The test runner refuses database names other than `learnspace_test` or `learnspace_test_*`, and fails clearly when unconfigured rather than claiming skipped tests passed. GitHub Actions provisions its own PostgreSQL service, migrates from empty, repeats deploy/seed, then runs all checks/builds. A remote CI run is not implied by local success.
 
+Integration tests compile the API and use loopback port **3102** to verify a real API process restart. Browser tests use production-built files on **3101** and write test image files under ignored `data/milestone2-e2e`. Keep these ports free. Test cleanup removes only fixtures it created; it does not truncate/reset the database. Run integration and browser suites sequentially because the foundation seed test checks database-wide counts.
+
+With TEST_DATABASE_URL still set to the migrated test database:
+
+```sh
+npm run build
+npx playwright install chromium
+npm run test:e2e
+```
+
+Linux CI uses `npx playwright install --with-deps chromium`. Windows sandbox restrictions may require normal Windows-account execution for PostgreSQL startup and Playwright process cleanup. Do not point the browser tests at development learning data.
+
 ## Health and local security
 
 - `GET /api/health` and `/api/v1/health/ready`: 200 only when required migrations and writable asset storage are ready; otherwise 503 with safe status fields.
@@ -102,22 +115,29 @@ Those session environment values override `.env`; removing them restores normal 
 
 ## Data and recovery
 
-Docker stores PostgreSQL in its named volume; future image files belong under `data/assets`. Back up PostgreSQL and asset files together. Stop writers while taking a backup until a consistent backup workflow is implemented. `docker compose down` retains the volume; `down -v` destroys it and is not part of normal setup.
+Docker stores PostgreSQL in its named volume; uploaded immutable image files live under `DATA_DIR/assets` (default `data/assets`). Back up PostgreSQL and asset files together. Stop writers while taking a backup until a consistent backup workflow is implemented. `docker compose down` retains the volume; `down -v` destroys it and is not part of normal setup.
 
-Custom migration SQL enforces root/child ordering, same-course parents/dependencies, cycle/leaf guards, JSON document roots, statuses, asset reference integrity, active-operation uniqueness and export lease restrictions. The complete editor validation/save/version workflow is still future work. Course deletion with historical assets must delete owning content/references before asset rows, honoring active export restrictions; there is no deletion API yet.
+Custom migration SQL enforces root/child ordering, same-course parents/dependencies, cycle/leaf guards, JSON document roots, statuses, asset reference integrity, active-operation uniqueness and export lease restrictions. Milestone 2 adds no migrations and preserves both existing migrations unchanged. Course deletion deletes owning content/history before asset rows; file garbage collection remains deferred.
+
+Notes autosave after 750 ms idle, or within five seconds of continuous typing. Only one save is in flight; lost responses retry the identical mutation ID/body. A conflict retains local notes: compare the server copy, download local JSON, then explicitly load the server copy or save local notes against a freshly fetched revision. Navigation flushes all edits or stays on the lesson with recovery choices. Browser unload warns about unsaved work; it does not promise an asynchronous save.
+
+IndexedDB stores best-effort drafts and pending save bodies, scoped per tab by a nonsecret session identifier. Reload offers an explicit recovery choice; resuming a stale draft still requires server revision checks. Browser storage eviction, denied storage, duplicated session-storage identities, or an OS/browser crash can limit recovery. Download JSON before closing a tab with failed saves. Invalid editor structures pause persistence and can be downloaded as live JSON for manual recovery.
+
+Every changed save snapshots the prior revision and its assets. Version restore creates a new revision and retains the replaced state. History is retained indefinitely; images cannot be deleted while current notes or history reference them. Cancelled uploads and deleted courses may leave orphan files until a separately verified garbage collector is implemented. Math is stored and displayed as literal LaTeX; tables are rectangular with no merged cells. History/conflict previews use JSON. These are functional controls, not the final polished interface.
 
 ## Project map
 
 ```text
 apps/web/                 React, Vite, Router, Tailwind, local shadcn/ui components
-apps/api/                 Express, configuration, health, Prisma connection
-packages/shared/          Browser-safe Zod contracts and JSON validation
+apps/api/                 Express services, locked transactions, assets and Prisma
+packages/shared/          Browser-safe contracts and shared Tiptap/headless schema
 packages/ai/              Reserved boundary; no model calls
 packages/document-export/ Reserved boundary; no export workflows
 prisma/                   Full proposed data model, migrations and syllabus-only seed
 tests/integration/        Real PostgreSQL and health verification
+tests/e2e/                Production-build Chromium preservation/race tests
 docs/                     Architecture, requirements, roadmap and milestone evidence
 .github/workflows/        PostgreSQL-backed CI
 ```
 
-Read [AGENTS.md](AGENTS.md), [architecture review](docs/ARCHITECTURE_REVIEW.md), [implementation plan](docs/IMPLEMENTATION_PLAN.md), and [contribution instructions](CONTRIBUTING.md). The owner must select a license before the project is distributed as open source; no license grant is implied by this foundation commit.
+Read [AGENTS.md](AGENTS.md), [architecture review](docs/ARCHITECTURE_REVIEW.md), [implementation plan](docs/IMPLEMENTATION_PLAN.md), and [contribution instructions](CONTRIBUTING.md). Milestone evidence is in [Milestone 2](docs/MILESTONE_2.md). The owner must select a license before open-source distribution. No commit, publication, deployment, or Milestone 3 implementation is automatic.

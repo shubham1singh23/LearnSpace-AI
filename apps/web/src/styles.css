@@ -17,3 +17,25 @@
   button, a { -webkit-tap-highlight-color: transparent; }
   ::selection { background: #cde5d7; }
 }
+/* Manual workspace: retain clear controls and a full-width editing surface. */
+.workspace { display: grid; grid-template-columns: 260px minmax(0, 1fr); min-height: 100vh; }
+.workspace aside { padding: 1.5rem; border-right: 1px solid #cbd5d1; background: #f5f8f5; }
+.workspace main { padding: 2rem; max-width: 1200px; min-width: 0; }
+.workspace h1, .workspace h2 { font-size: 1.5rem; font-weight: 600; margin: 1rem 0; }
+.workspace button, .editor-toolbar label, .workspace select { border: 1px solid #abbdb2; border-radius: 5px; padding: .35rem .55rem; background: white; margin: .15rem; cursor: pointer; }
+.workspace button:disabled { opacity: .5; cursor: wait; }
+.workspace button[aria-current], .workspace button[aria-pressed=true] { background: #d1e8d8; }
+.workspace nav button { display: block; width: 100%; text-align: left; }
+.workspace ul { padding-left: .7rem; }
+.workspace input { border: 1px solid #abbdb2; padding: .25rem; margin: .25rem; }
+.workspace details label { display: block; }
+.editor-toolbar { display: flex; flex-wrap: wrap; align-items: center; margin: .8rem 0; gap: .15rem; }
+.tiptap { min-height: 340px; padding: 1.5rem; border: 1px solid #abbdb2; border-radius: 8px; background: white; outline-offset: 3px; overflow-wrap: anywhere; }
+.tiptap p { margin: .6rem 0; }
+.tiptap ul { list-style: disc; padding-left: 2rem; }.tiptap ol { list-style: decimal; padding-left: 2rem; }
+.tiptap h1 { font-size: 2rem; }.tiptap h2 { font-size: 1.7rem; }.tiptap h3 { font-size: 1.4rem; }
+.tiptap h4, .tiptap h5, .tiptap h6 { font-weight: bold; }
+.tiptap table { border-collapse: collapse; width: 100%; }.tiptap th, .tiptap td { border: 1px solid #9baea3; min-width: 70px; padding: .4rem; }
+.tiptap pre { white-space: pre-wrap; background: #edf1ee; padding: 1rem; }.tiptap blockquote { border-left: 3px solid #789b87; padding-left: 1rem; }
+.tiptap img { max-width: 100%; height: auto; }.tiptap section { border-left: 3px solid #9baea3; padding: .5rem; }.notice { background: #fff5d9; padding: 1rem; margin: 1rem 0; }
+@media (max-width: 760px) { .workspace { grid-template-columns: 1fr; }.workspace main { padding: 1rem; }.workspace aside { border-bottom: 1px solid #abbdb2; }.editor-toolbar { font-size: .85rem; } }

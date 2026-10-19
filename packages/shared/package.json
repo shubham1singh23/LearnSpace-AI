@@ -1,6 +1,22 @@
 {
-  "name": "@learnspace/shared", "version": "0.1.0", "private": true, "type": "module",
-  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
-  "scripts": { "build": "tsc -p tsconfig.json", "dev": "tsc -p tsconfig.json --watch", "typecheck": "tsc --noEmit -p tsconfig.json" },
-  "dependencies": { "zod": "^4.1.0" }
+  "name": "@learnspace/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@tiptap/core": "3.32.0",
+    "@tiptap/pm": "3.32.0",
+    "zod": "^4.1.0"
+  }
 }

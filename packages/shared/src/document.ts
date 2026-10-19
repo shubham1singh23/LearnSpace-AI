@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { editorSchema } from './editor-schema.js';
+export { documentExtensions, editorSchema, editorJSON } from './editor-schema.js';
 
 const id = z.uuid();
 const learning = { learningRole: z.enum(['reflection', 'recall_question', 'recall_answer']).optional(), learningGroupId: id.optional() };
@@ -66,6 +68,9 @@ const nodeSchema: z.ZodType<DocumentNode> = z.lazy(() => z.object({
   if (node.type === 'listItem' && children[0]?.type !== 'paragraph') fail('List item must start with paragraph');
   if (node.type === 'table' && children.length > 200) fail('Too many table rows');
   if (node.type === 'tableRow' && children.length > 50) fail('Too many table columns');
+  if (node.type === 'table' && new Set(children.map(row => row.content?.length)).size > 1) fail('Table must be rectangular');
+  if (node.marks && new Set(node.marks.map(mark => mark.type)).size !== node.marks.length) fail('Duplicate marks');
+  if (node.marks?.some(mark => mark.type === 'code') && node.marks.length > 1) fail('Code excludes other marks');
 }));
 
 // Resource checks run before recursive parsing to avoid deeply nested untrusted JSON.
@@ -92,5 +97,7 @@ export const tiptapDocumentSchema = z.unknown().transform((input, ctx): TiptapDo
   catch { return fail('Document must be serializable JSON'); }
   const result = nodeSchema.safeParse(input);
   if (!result.success || result.data.type !== 'doc' || !result.data.content) return fail('Invalid Tiptap document structure');
+  try { editorSchema.nodeFromJSON(result.data).check(); }
+  catch { return fail('Document violates the shared editor schema'); }
   return result.data as TiptapDocument;
 });

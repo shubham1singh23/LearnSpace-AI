@@ -4,12 +4,13 @@ import express, { type ErrorRequestHandler } from 'express';
 import { healthSchema, type Health } from '@learnspace/shared';
 import { ZodError } from 'zod';
 import type { Environment } from './config.js';
+import { HttpError } from './errors.js';
+export { HttpError } from './errors.js';
+import type { Database } from './db.js';
+import { workspaceRouter } from './workspace/router.js';
+import { assetRouter } from './workspace/asset-router.js';
 
-export class HttpError extends Error {
-  constructor(public status: number, public code: string, message: string, public retryable = false) { super(message); }
-}
-
-export function createApp(env: Environment, readiness: () => Promise<Health>, webDirectory?: string) {
+export function createApp(env: Environment, readiness: () => Promise<Health>, webDirectory?: string, db?: Database, assetRoot = resolve(env.DATA_DIR, 'assets')) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', false);
@@ -43,12 +44,14 @@ export function createApp(env: Environment, readiness: () => Promise<Health>, we
       res.vary('Origin');
     }
     if (req.method === 'OPTIONS') {
-      res.set({ 'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-LearnSpace-Request', 'Access-Control-Max-Age': '600' });
+      res.set({ 'Access-Control-Allow-Methods': 'GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-LearnSpace-Request', 'Access-Control-Max-Age': '600' });
       res.status(204).end(); return;
     }
     if (!['GET', 'HEAD'].includes(req.method)) {
       if (!origin) return next(new HttpError(403, 'ORIGIN_REQUIRED', 'A local origin is required.'));
-      if (!req.is('application/json')) return next(new HttpError(415, 'UNSUPPORTED_MEDIA_TYPE', 'Expected application/json.'));
+      const upload = req.method === 'POST' && /^\/api\/v1\/courses\/[a-f0-9-]+\/assets$/.test(req.path) && req.is('multipart/form-data');
+      if (upload && req.headers['x-learnspace-request'] !== '1') return next(new HttpError(403, 'REQUEST_HEADER_REQUIRED', 'Upload requires the local request header.'));
+      if (!upload && !req.is('application/json')) return next(new HttpError(415, 'UNSUPPORTED_MEDIA_TYPE', 'Expected application/json.'));
     }
     next();
   });
@@ -60,6 +63,7 @@ export function createApp(env: Environment, readiness: () => Promise<Health>, we
   app.get('/api/health', health); // Explicit Milestone 1 endpoint, alongside versioned design routes.
   app.get('/api/v1/health/ready', health);
   app.get('/api/v1/health/live', (_req, res) => { res.json({ data: { status: 'ok', service: 'learnspace-api' }, requestId: res.locals.requestId }); });
+  if (db) { app.use('/api/v1', assetRouter(db, assetRoot)); app.use('/api/v1', workspaceRouter(db)); }
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'NOT_FOUND', 'API endpoint not found.')));
   if (webDirectory) {
     app.use(express.static(webDirectory, { index: false, dotfiles: 'deny' }));
@@ -74,7 +78,7 @@ export function createApp(env: Environment, readiness: () => Promise<Health>, we
       if (error.type === 'entity.parse.failed') safe = new HttpError(400, 'INVALID_JSON', 'Malformed JSON.');
       if (error.type === 'entity.too.large') safe = new HttpError(413, 'PAYLOAD_TOO_LARGE', 'Request exceeds the size limit.');
     }
-    res.status(safe.status).json({ error: { code: safe.code, message: safe.message, retryable: safe.retryable }, requestId: res.locals.requestId });
+    res.status(safe.status).json({ error: { code: safe.code, message: safe.message, retryable: safe.retryable, ...(safe.details ? { details: safe.details } : {}) }, requestId: res.locals.requestId });
   };
   app.use(errorHandler);
   return app;

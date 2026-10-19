@@ -7,7 +7,8 @@ import { createReadiness } from './readiness.js';
 try {
   const env = loadEnvironment();
   const db = createDatabase(env.DATABASE_URL);
-  const app = createApp(env, createReadiness(db, resolve(workspaceRoot, env.DATA_DIR, 'assets')), env.NODE_ENV === 'production' ? resolve(workspaceRoot, 'apps/web/dist') : undefined);
+  const assetRoot = resolve(workspaceRoot, env.DATA_DIR, 'assets');
+  const app = createApp(env, createReadiness(db, assetRoot), env.NODE_ENV === 'production' ? resolve(workspaceRoot, 'apps/web/dist') : undefined, db, assetRoot);
   const server = app.listen(env.API_PORT, env.API_HOST, () => { console.info(`LearnSpace API listening on loopback port ${env.API_PORT}`); });
   server.on('error', () => { console.error('API could not bind to the configured local address/port.'); process.exitCode = 1; void db.$disconnect(); });
   let stopping = false;

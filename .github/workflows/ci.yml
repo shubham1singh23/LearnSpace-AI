@@ -1,4 +1,4 @@
-name: Foundation CI
+name: Workspace CI
 on:
   push:
   pull_request:
@@ -9,7 +9,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:18.3
@@ -46,3 +46,11 @@ jobs:
         run: npm run db:seed && npm run db:seed
       - run: npm run test:integration
       - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-failure-traces
+          path: test-results/
+          retention-days: 7

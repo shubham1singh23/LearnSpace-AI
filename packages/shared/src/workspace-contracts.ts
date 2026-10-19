@@ -1,0 +1,35 @@
+import { z } from 'zod';
+import { idSchema, treeRevisionSchema, revisionSchema, preferencesSchema, topicSchema, lessonSchema } from './base-contracts.js';
+import { tiptapDocumentSchema } from './document.js';
+
+const title = z.string().trim().min(1).max(240);
+const objectives = z.array(z.string().min(1).max(1000)).max(30);
+const treeBase = { baseTreeRevision: treeRevisionSchema };
+const changed = (value: Record<string, unknown>) => Object.keys(value).some(key => key !== 'baseTreeRevision');
+export const patchCourseSchema = z.object({ ...treeBase, title: title.optional(), goal: z.string().trim().min(1).max(8000).optional(), preferences: preferencesSchema.optional() }).strict().refine(changed, 'At least one change required');
+export const createTopicSchema = z.object({ ...treeBase, parentId: idSchema.nullable(), title, kind: z.enum(['module', 'topic', 'subtopic']), position: z.number().int().nonnegative(), objectives }).strict();
+export const patchTopicSchema = z.object({ ...treeBase, title: title.optional(), objectives: objectives.optional(), kind: z.enum(['module', 'topic', 'subtopic']).optional() }).strict().refine(changed, 'At least one change required');
+const ids = z.array(idSchema).max(2000).refine(value => new Set(value).size === value.length, 'Duplicate IDs');
+export const orderTopicsSchema = z.object({ ...treeBase, parentId: idSchema.nullable(), orderedSiblingIds: ids }).strict();
+export const moveTopicSchema = z.object({ ...treeBase, topicId: idSchema, newParentId: idSchema.nullable(), orderedSiblingIds: ids }).strict();
+export const wrapTopicSchema = z.object({ ...treeBase, containerTitle: title }).strict();
+export const deleteCourseSchema = z.object({ ...treeBase, confirm: z.literal(true) }).strict();
+export const deleteTopicSchema = z.object({ ...treeBase, confirmSubtree: z.literal(true) }).strict();
+export const prerequisitesSchema = z.object({ ...treeBase, prerequisiteIds: ids }).strict();
+export const choiceSchema = z.object({ choice: z.enum(['study', 'skip', 'undecided']) }).strict();
+export const edgeSchema = choiceSchema.extend({ topicId: idSchema, prerequisiteId: idSchema });
+export const treeSchema = z.object({ treeRevision: treeRevisionSchema, topics: z.array(topicSchema).max(2000), prerequisites: z.array(edgeSchema) }).strict();
+export const topicMutationSchema = topicSchema.extend({ treeRevision: treeRevisionSchema });
+export const treeMutationSchema = z.object({ treeRevision: treeRevisionSchema }).strict();
+export const prerequisiteMutationSchema = treeMutationSchema.extend({ prerequisites: z.array(edgeSchema) });
+export const edgeMutationSchema = edgeSchema.extend({ treeRevision: treeRevisionSchema });
+export const createLessonSchema = z.object({ mutationId: idSchema, documentSchemaVersion: z.literal(1), document: tiptapDocumentSchema }).strict();
+export const restoreLessonSchema = z.object({ sourceRevision: revisionSchema, baseRevision: revisionSchema, mutationId: idSchema, confirm: z.literal(true) }).strict();
+export const receiptSchema = z.object({ id: idSchema, revision: revisionSchema, mutationId: idSchema, updatedAt: z.iso.datetime(), contentHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
+export const versionMetadataSchema = z.object({ revision: revisionSchema, createdAt: z.iso.datetime(), source: z.enum(['manual', 'initial_ai', 'ai_edit', 'regenerate', 'restore']), operationId: idSchema.nullable(), restoredFromRevision: revisionSchema.nullable(), contentHash: z.string().regex(/^[a-f0-9]{64}$/), documentSchemaVersion: z.literal(1) }).strict();
+export const versionSchema = versionMetadataSchema.extend({ document: tiptapDocumentSchema });
+export const versionsSchema = z.object({ currentRevision: revisionSchema, versions: z.array(versionMetadataSchema), page: z.object({ nextCursor: z.string().nullable() }).strict() }).strict();
+export const conflictSchema = z.object({ code: z.literal('REVISION_CONFLICT'), message: z.string(), retryable: z.literal(false), details: z.object({ currentRevision: revisionSchema }).strict() }).strict();
+export const assetSchema = z.object({ id: idSchema, mimeType: z.enum(['image/png', 'image/jpeg', 'image/webp']), bytes: z.number().int().positive().max(10 * 1024 * 1024), width: z.number().int().positive(), height: z.number().int().positive(), url: z.string().regex(/^\/api\/v1\/assets\/[a-f0-9-]+\/content$/), alt: z.string().max(1000).optional() }).strict();
+export const lessonResponseSchema = z.object({ data: lessonSchema, requestId: idSchema }).strict();
+
