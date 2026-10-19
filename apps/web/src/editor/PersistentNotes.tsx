@@ -6,6 +6,7 @@ import { api, envelope, ApiError } from '../api';
 import { Autosave, type SaveStatus } from '../persistence/autosave';
 import { IndexedDBRecovery, type RecoveryDraft } from '../persistence/recovery';
 import { NotesEditor } from './NotesEditor';
+import { Regeneration } from './Regeneration';
 
 export interface NotesHandle { flush(): Promise<void>; dirty(): boolean; download(): void; freeze(value: boolean): void }
 interface Props { lesson: Lesson; courseId: string; onHandle: (handle: NotesHandle | undefined) => void }
@@ -31,6 +32,9 @@ export function PersistentNotes({ lesson, courseId, onHandle }: Props) {
   const [invalid, setInvalid] = useState(false);
   const [frozen, setFrozen] = useState(false);
   const editor = useRef<Editor | undefined>(undefined);
+  const [liveEditor, setLiveEditor] = useState<Editor>();
+  const [regenerationPending, setRegenerationPending] = useState(false);
+  const regenerationPendingRef = useRef(false);
   const [history, setHistory] = useState<z.infer<typeof versionsSchema>>();
   const [preview, setPreview] = useState<z.infer<typeof versionSchema>>();
   const [restorePending, setRestorePending] = useState(false);
@@ -42,9 +46,9 @@ export function PersistentNotes({ lesson, courseId, onHandle }: Props) {
     return () => { active = false; };
   }, [lesson.id]);
   useEffect(() => {
-    onHandle({ flush: async () => { if (restoreAttempt.current) throw new Error('Resolve the pending restore acknowledgement first.'); if (invalid || draft || !checked) throw new Error('Resolve invalid content or the recovery draft first.'); await queue.flush(); }, dirty: () => queue.dirty || invalid || !!draft || !checked || !!restoreAttempt.current, download: () => downloadJSON(draft ?? (invalid ? editor.current?.getJSON() : queue.snapshot)), freeze: value => { editor.current?.setEditable(!value, false); setFrozen(value); } });
+    onHandle({ flush: async () => { if (restoreAttempt.current || regenerationPendingRef.current) throw new Error('Resolve the pending replacement acknowledgement first.'); if (invalid || draft || !checked) throw new Error('Resolve invalid content or the recovery draft first.'); await queue.flush(); }, dirty: () => queue.dirty || invalid || !!draft || !checked || !!restoreAttempt.current || regenerationPendingRef.current, download: () => downloadJSON(draft ?? (invalid ? editor.current?.getJSON() : queue.snapshot)), freeze: value => { const paused = value || !!restoreAttempt.current || regenerationPendingRef.current; editor.current?.setEditable(!paused, false); setFrozen(paused); } });
     return () => onHandle(undefined);
-  }, [queue, onHandle, invalid, draft, checked]);
+  }, [queue, onHandle, invalid, draft, checked, regenerationPending]);
   useEffect(() => { queue.start(); return () => queue.stop(); }, [queue]);
   async function perform(work: () => Promise<unknown>) { try { setError(''); await work(); } catch (error) { setError(error instanceof Error ? error.message : 'Save failed.'); } }
   async function loadRemote() { const value = (await api(`/topics/${lesson.topicId}/lesson`, envelope(lessonSchema))).data; setRemote(value); return value; }
@@ -85,6 +89,7 @@ export function PersistentNotes({ lesson, courseId, onHandle }: Props) {
         throw error;
       }
     })}>{restorePending ? 'Retry pending restore' : 'Restore this version'}</button>{restorePending && <p>Restore acknowledgement is pending. Editing is paused; retry uses the same mutation ID.</p>}</section>}
-    <NotesEditor key={`${lesson.id}:${epoch}`} document={editorDocument} courseId={courseId} disabled={!checked || !!draft || frozen} onReady={value => { editor.current = value; }} onValidity={value => { setInvalid(value); if (value) queue.invalidate(); }} onChange={document => queue.edit(document)} />
+    <Regeneration lesson={lesson} courseId={courseId} queue={queue} editor={liveEditor} canStart={checked && !draft && !invalid && !frozen} freeze={freeze} onPending={value => { regenerationPendingRef.current = value; setRegenerationPending(value); }} />
+    <NotesEditor key={`${lesson.id}:${epoch}`} document={editorDocument} courseId={courseId} disabled={!checked || !!draft || frozen} onReady={value => { editor.current = value; setLiveEditor(value); }} onValidity={value => { setInvalid(value); if (value) queue.invalidate(); }} onChange={document => queue.edit(document)} />
   </>;
 }

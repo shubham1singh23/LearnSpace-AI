@@ -17,15 +17,15 @@
     "react-dom": "19.2.9"
   },
   "scripts": {
-    "dev": "npm run build -w @learnspace/shared && concurrently --kill-others-on-fail -n shared,api,web \"npm run dev -w @learnspace/shared\" \"npm run dev -w @learnspace/api\" \"npm run dev -w @learnspace/web\"",
+    "dev": "npm run build -w @learnspace/shared && npm run build -w @learnspace/ai && concurrently --kill-others-on-fail -n shared,ai,api,web \"npm run dev -w @learnspace/shared\" \"npm run dev -w @learnspace/ai\" \"npm run dev -w @learnspace/api\" \"npm run dev -w @learnspace/web\"",
     "build": "npm run build -w @learnspace/shared && npm run build -w @learnspace/ai && npm run build -w @learnspace/document-export && npm run build -w @learnspace/api && npm run build -w @learnspace/web",
     "start": "npm run start -w @learnspace/api",
-    "typecheck": "npm run build -w @learnspace/shared && tsc --noEmit -p tsconfig.tools.json && npm run typecheck --workspaces --if-present",
+    "typecheck": "npm run build -w @learnspace/shared && npm run build -w @learnspace/ai && tsc --noEmit -p tsconfig.tools.json && npm run typecheck --workspaces --if-present",
     "lint": "eslint . --max-warnings 0",
     "test": "npm run test:unit",
-    "test:unit": "npm run build -w @learnspace/shared && vitest run --config vitest.config.ts",
-    "test:integration": "npm run build -w @learnspace/shared && npm run build -w @learnspace/api && vitest run --config vitest.integration.config.ts",
-    "test:e2e": "playwright test",
+    "test:unit": "npm run build -w @learnspace/shared && npm run build -w @learnspace/ai && vitest run --config vitest.config.ts",
+    "test:integration": "npm run build -w @learnspace/shared && npm run build -w @learnspace/ai && npm run build -w @learnspace/api && npm run build:test-server && vitest run --config vitest.integration.config.ts",
+    "test:e2e": "npm run build:test-server && playwright test",
     "check": "npm run db:validate && npm run lint && npm run typecheck && npm run test:unit && npm run build",
     "db:generate": "prisma generate",
     "db:validate": "prisma validate",
@@ -34,7 +34,8 @@
     "db:status": "prisma migrate status",
     "db:seed": "prisma db seed",
     "db:up": "docker compose up -d --wait db",
-    "db:down": "docker compose down"
+    "db:down": "docker compose down",
+    "build:test-server": "tsc -p tsconfig.e2e.json"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

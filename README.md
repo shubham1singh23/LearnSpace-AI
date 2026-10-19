@@ -1,6 +1,6 @@
 # LearnSpace AI
 
-A local-first learning platform under active development. **Milestone 2 implements a persistent manual workspace:** course/topic/prerequisite management, Tiptap notes, raster uploads, sequential autosave, conflict recovery, and version history. AI, chat, exports, and authentication are not implemented.
+A local-first learning platform under active development. **Milestone 3 adds text model setup, reviewed syllabus generation, explicit on-demand lessons and previewed regeneration** to the persistent manual workspace. Chat, targeted selection AI edits, image generation, exports and authentication remain unimplemented.
 
 The workspace loads real courses and their arbitrary nested topic trees. Select a leaf and choose **Create blank notes**. Seeding adds hierarchy/objectives only, with no lesson documents or AI calls. Use **Wrap topic** to add a container above a leaf with notes while retaining its identity.
 
@@ -33,7 +33,7 @@ npm run dev
 
 Open **http://127.0.0.1:5173**. API health: **http://127.0.0.1:3001/api/health**. The Vite proxy keeps browser requests local; use the exact configured WEB_ORIGIN. API_PORT/API_HOST and WEB_ORIGIN are read by development configuration; restart after changes.
 
-For an existing PostgreSQL installation, create a dedicated `learnspace` database and set DATABASE_URL to its loopback connection; skip `db:up`. The application does not migrate or overwrite databases automatically. `db:seed` is repeatable and never rewrites an existing sample course or lesson. No model configuration/key is required for this milestone. Optional AI environment variables are validated but not used for calls.
+For an existing PostgreSQL installation, create a dedicated `learnspace` database and set DATABASE_URL to its loopback connection; skip `db:up`. The application does not migrate or overwrite databases automatically. `db:seed` is repeatable and never rewrites an existing sample course or lesson. Manual notes require no model configuration/key. To enable explicit generation, configure a text provider/model in the settings UI or set LEARNSPACE_TEXT_PROVIDER and LEARNSPACE_TEXT_MODEL with the matching server key. Environment defaults are initialized only when no text default exists; later environment model changes never overwrite UI choices.
 
 ## Production build on the local machine
 
@@ -47,7 +47,7 @@ Set NODE_ENV=production in `.env`, then `npm start`. Open **http://127.0.0.1:300
 
 | Command | Purpose |
 |---|---|
-| `npm run dev` | Build/watch shared contracts, run API and Vite |
+| `npm run dev` | Build/watch shared contracts and AI package, run API and Vite |
 | `npm run build` | Build all packages, backend and frontend |
 | `npm run typecheck` / `npm run lint` | TypeScript / ESLint checks |
 | `npm test` / `npm run test:unit` | Contracts, configuration and API boundary tests |
@@ -93,7 +93,7 @@ Remove-Item Env:TEST_DATABASE_URL
 
 Those session environment values override `.env`; removing them restores normal `.env` configuration on the next run. The test runner refuses database names other than `learnspace_test` or `learnspace_test_*`, and fails clearly when unconfigured rather than claiming skipped tests passed. GitHub Actions provisions its own PostgreSQL service, migrates from empty, repeats deploy/seed, then runs all checks/builds. A remote CI run is not implied by local success.
 
-Integration tests compile the API and use loopback port **3102** to verify a real API process restart. Browser tests use production-built files on **3101** and write test image files under ignored `data/milestone2-e2e`. Keep these ports free. Test cleanup removes only fixtures it created; it does not truncate/reset the database. Run integration and browser suites sequentially because the foundation seed test checks database-wide counts.
+Integration tests compile the API and use loopback port **3102** to verify a real API process restart. Browser tests use production-built web files and a dedicated fake-provider API on **3101**, and write test images under ignored `data/milestone3-e2e`. Operation crash recovery also uses **3104**. Keep these ports free. Test cleanup removes only fixtures it created; it does not truncate/reset the database. Run integration and browser suites sequentially because the foundation seed test checks database-wide counts.
 
 With TEST_DATABASE_URL still set to the migrated test database:
 
@@ -131,7 +131,7 @@ Every changed save snapshots the prior revision and its assets. Version restore 
 apps/web/                 React, Vite, Router, Tailwind, local shadcn/ui components
 apps/api/                 Express services, locked transactions, assets and Prisma
 packages/shared/          Browser-safe contracts and shared Tiptap/headless schema
-packages/ai/              Reserved boundary; no model calls
+packages/ai/              Four LangChain text adapters, guarded transport, prompts and compiler
 packages/document-export/ Reserved boundary; no export workflows
 prisma/                   Full proposed data model, migrations and syllabus-only seed
 tests/integration/        Real PostgreSQL and health verification
@@ -140,4 +140,16 @@ docs/                     Architecture, requirements, roadmap and milestone evid
 .github/workflows/        PostgreSQL-backed CI
 ```
 
-Read [AGENTS.md](AGENTS.md), [architecture review](docs/ARCHITECTURE_REVIEW.md), [implementation plan](docs/IMPLEMENTATION_PLAN.md), and [contribution instructions](CONTRIBUTING.md). Milestone evidence is in [Milestone 2](docs/MILESTONE_2.md). The owner must select a license before open-source distribution. No commit, publication, deployment, or Milestone 3 implementation is automatic.
+Read [AGENTS.md](AGENTS.md), [architecture review](docs/ARCHITECTURE_REVIEW.md), [implementation plan](docs/IMPLEMENTATION_PLAN.md), and [contribution instructions](CONTRIBUTING.md). Milestone evidence is in [Milestone 2](docs/MILESTONE_2.md) and [Milestone 3](docs/MILESTONE_3.md). The owner must select a license before open-source distribution. No commit, publication, deployment, or Milestone 4 implementation is automatic.
+
+## Text generation and recovery
+
+Open **Text model settings** to choose OpenAI, Anthropic, Google Gemini or local Ollama and enter an explicit model ID. Hosted providers use an allowlisted server environment variable or a session key submitted to the local API. Session keys are cleared from the form immediately and are held only in server memory, expiring after eight hours or API restart. There is no browser key persistence or encrypted credential vault. Ollama uses a loopback IP endpoint (default `http://127.0.0.1:11434`); its port can be configured through the API or initial environment default. Hosted endpoints are fixed HTTPS origins; redirects are rejected. The connection test is an explicit, small, potentially paid text request. No model catalog or live model compatibility is implied.
+
+Create a course, explicitly generate a syllabus draft, review/edit its JSON and commit it into an empty tree. No lessons generate during course creation, syllabus commit, topic opening or reload. On a leaf choose **Generate lesson** or **Create blank notes**. Generated notes pass educational schemas and the same canonical editor validation as manual notes. This checks structure, not factual accuracy; review educational content and any unverified source claims.
+
+Regeneration first saves current edits and creates a replacement preview. Any intervening local document edit, including undo, invalidates acceptance. Acceptance is an isolated revision-checked save; previous notes and images remain in history. Unknown replacement acknowledgements pause editing/navigation and retry the identical mutation. Recover durable operations through **Course generation activity**; a fresh unchanged lesson can recover its regeneration preview. Operations cancelled, interrupted or expired never automatically rerun.
+
+Status SSE has durable polling fallback. Execution leases last 30 seconds and renew every five seconds; text work has a 120-second overall deadline. Ready previews expire after seven days. A restart may display an interrupted operation after its lease expires. Provider cancellation is best effort remotely, while database ownership guards prevent late content commits. Run one local API process; the in-memory credential vault and probe admission are process-scoped.
+
+Mandatory tests use fake providers, including the browser server in `tests/support/server.ts`; it cannot resolve personal environment keys or fall back to real model calls. There is no automatic live-provider test script. Optional live verification requires explicitly configured credentials and a deliberate connection test or generation action. Changing models preserves existing courses, notes and history.

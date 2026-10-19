@@ -27,6 +27,7 @@ export class Autosave {
   get dirty() { return this.invalid || this.sequence !== this.acknowledged || !!this.inFlight; }
   get snapshot() { return structuredClone(this.document); }
   get currentRevision() { return this.revision; }
+  get localSequence() { return this.sequence; }
   private emit() { this.notify({ state: this.state, revision: this.revision, dirty: this.dirty, message: this.message, recoveryWarning: this.recoveryWarning }); }
   private persist() {
     const draft: RecoveryDraft = { lessonId: this.lesson.id, topicId: this.lesson.topicId, baseRevision: this.revision, sequence: this.sequence, acknowledged: this.acknowledged, document: structuredClone(this.document), updatedAt: new Date().toISOString(), ...(this.inFlight ? { inFlight: structuredClone(this.inFlight) } : {}) };
@@ -50,6 +51,7 @@ export class Autosave {
     this.maximum ??= setTimeout(() => void this.flush().catch(() => undefined), 5000);
   }
   invalidate() {
+    this.sequence++;
     this.invalid = true; this.state = 'error'; this.message = 'Correct the invalid editor structure before saving.';
     clearTimeout(this.idle); clearTimeout(this.maximum); this.maximum = undefined; this.emit();
   }

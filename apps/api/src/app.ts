@@ -9,8 +9,11 @@ export { HttpError } from './errors.js';
 import type { Database } from './db.js';
 import { workspaceRouter } from './workspace/router.js';
 import { assetRouter } from './workspace/asset-router.js';
+import { ConfigurationService } from './ai/configuration.js';
+import { aiRouter } from './ai/router.js';
+import { OperationService } from './ai/operations.js';
 
-export function createApp(env: Environment, readiness: () => Promise<Health>, webDirectory?: string, db?: Database, assetRoot = resolve(env.DATA_DIR, 'assets')) {
+export function createApp(env: Environment, readiness: () => Promise<Health>, webDirectory?: string, db?: Database, assetRoot = resolve(env.DATA_DIR, 'assets'), configuration?: ConfigurationService, operations?: OperationService) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', false);
@@ -44,7 +47,7 @@ export function createApp(env: Environment, readiness: () => Promise<Health>, we
       res.vary('Origin');
     }
     if (req.method === 'OPTIONS') {
-      res.set({ 'Access-Control-Allow-Methods': 'GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-LearnSpace-Request', 'Access-Control-Max-Age': '600' });
+      res.set({ 'Access-Control-Allow-Methods': 'GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-LearnSpace-Request, Idempotency-Key', 'Access-Control-Max-Age': '600' });
       res.status(204).end(); return;
     }
     if (!['GET', 'HEAD'].includes(req.method)) {
@@ -63,7 +66,11 @@ export function createApp(env: Environment, readiness: () => Promise<Health>, we
   app.get('/api/health', health); // Explicit Milestone 1 endpoint, alongside versioned design routes.
   app.get('/api/v1/health/ready', health);
   app.get('/api/v1/health/live', (_req, res) => { res.json({ data: { status: 'ok', service: 'learnspace-api' }, requestId: res.locals.requestId }); });
-  if (db) { app.use('/api/v1', assetRouter(db, assetRoot)); app.use('/api/v1', workspaceRouter(db)); }
+  if (db) {
+    const models = configuration ?? new ConfigurationService(db, env);
+    app.use('/api/v1', aiRouter(models, operations ?? new OperationService(models)));
+    app.use('/api/v1', assetRouter(db, assetRoot)); app.use('/api/v1', workspaceRouter(db));
+  }
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'NOT_FOUND', 'API endpoint not found.')));
   if (webDirectory) {
     app.use(express.static(webDirectory, { index: false, dotfiles: 'deny' }));

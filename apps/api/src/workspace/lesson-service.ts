@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { createLessonSchema, lessonSchema, receiptSchema, restoreLessonSchema, saveLessonSchema, tiptapDocumentSchema, versionSchema, versionsSchema, type DocumentNode, type TiptapDocument } from '@learnspace/shared';
+import { createLessonSchema, lessonSchema, operationResultSchema, receiptSchema, regenerationCommitSchema, restoreLessonSchema, saveLessonSchema, tiptapDocumentSchema, versionSchema, versionsSchema, type DocumentNode, type TiptapDocument } from '@learnspace/shared';
 import type { z } from 'zod';
 import type { Database } from '../db.js';
 import type { Lesson, Prisma } from '../generated/prisma/client.js';
@@ -74,7 +74,21 @@ export class LessonService {
       return tiptapDocumentSchema.parse(version.document);
     }, input.sourceRevision);
   }
-  private async write(id: string, mutationId: string, baseRevision: number, requestHash: string, getDocument: (tx: Transaction, lesson: Lesson) => TiptapDocument | Promise<TiptapDocument>, restoredFromRevision?: number) {
+  async regenerate(id: string, raw: unknown) {
+    const input = regenerationCommitSchema.parse(raw);
+    return this.write(id, input.mutationId, input.baseRevision, hashJSON({ kind: 'regenerate', ...input }), async (tx, current) => {
+      await tx.$queryRaw`SELECT id FROM ai_operations WHERE id = ${input.operationId}::uuid FOR UPDATE`;
+      const operation = await tx.aiOperation.findUnique({ where: { id: input.operationId } });
+      if (!operation || operation.kind !== 'regeneration' || operation.lessonId !== id || operation.topicId !== current.topicId) throw new HttpError(404, 'NOT_FOUND', 'Regeneration proposal not found for this lesson.');
+      const result = operationResultSchema.safeParse(operation.result);
+      if (operation.status !== 'ready' || !result.success || result.data.type !== 'lesson' || new Date(result.data.readyAt).getTime() < Date.now() - 7 * 86400000) throw new HttpError(409, 'OPERATION_NOT_READY', 'Regeneration is no longer available.');
+      const topic = await tx.topic.findUniqueOrThrow({ where: { id: current.topicId }, include: { course: true } });
+      if (operation.courseId !== topic.courseId || operation.baseRevision !== input.baseRevision || operation.baseTreeRevision !== topic.course.treeRevision) throw new HttpError(409, 'STALE_CONTEXT', 'The lesson or course context changed after generation.');
+      if (hashJSON(result.data.document) !== result.data.contentHash) throw new HttpError(409, 'INVALID_OPERATION', 'Proposal integrity validation failed.');
+      return result.data.document;
+    }, undefined, input.operationId);
+  }
+  private async write(id: string, mutationId: string, baseRevision: number, requestHash: string, getDocument: (tx: Transaction, lesson: Lesson) => TiptapDocument | Promise<TiptapDocument>, restoredFromRevision?: number, regenerationId?: string) {
     return transaction(this.db, async tx => {
       const owner = await tx.lesson.findUnique({ where: { id }, select: { topic: { select: { courseId: true } } } });
       if (!owner) throw new HttpError(404, 'NOT_FOUND', 'Lesson not found.');
@@ -91,16 +105,17 @@ export class LessonService {
       const ids = await validateAssets(tx, owner.topic.courseId, document);
       const contentHash = hashJSON(document);
       let updated = current;
-      if (contentHash !== current.contentHash || restoredFromRevision !== undefined) {
+      if (contentHash !== current.contentHash || restoredFromRevision !== undefined || regenerationId !== undefined) {
         const references = await tx.lessonAsset.findMany({ where: { lessonId: id } });
         await tx.documentVersion.create({ data: { lessonId: id, revision: current.revision, document: documentJSON(tiptapDocumentSchema.parse(current.document)), documentSchemaVersion: current.documentSchemaVersion, contentHash: current.contentHash, source: current.source, operationId: current.operationId, restoredFromRevision: current.restoredFromRevision, createdAt: current.updatedAt, assets: { create: references.map(reference => ({ assetId: reference.assetId })) } } });
-        const result = await tx.lesson.updateMany({ where: { id, revision: baseRevision }, data: { document: documentJSON(document), contentHash, revision: { increment: 1 }, source: restoredFromRevision === undefined ? 'manual' : 'restore', operationId: null, restoredFromRevision: restoredFromRevision ?? null } });
+        const result = await tx.lesson.updateMany({ where: { id, revision: baseRevision }, data: { document: documentJSON(document), contentHash, revision: { increment: 1 }, source: regenerationId ? 'regenerate' : restoredFromRevision === undefined ? 'manual' : 'restore', operationId: regenerationId ?? null, restoredFromRevision: restoredFromRevision ?? null } });
         if (result.count !== 1) throw new HttpError(409, 'REVISION_CONFLICT', 'Notes changed.');
         await tx.lessonAsset.deleteMany({ where: { lessonId: id } });
         await tx.lessonAsset.createMany({ data: ids.map(assetId => ({ lessonId: id, assetId })) });
         updated = await tx.lesson.findUniqueOrThrow({ where: { id } });
       }
       const saved = await tx.lessonMutation.create({ data: { lessonId: id, mutationId, requestHash, resultingRevision: updated.revision, resultingUpdatedAt: updated.updatedAt, resultingContentHash: updated.contentHash } });
+      if (regenerationId) await tx.aiOperation.update({ where: { id: regenerationId }, data: { status: 'applied', result: { type: 'applied_lesson', lessonId: id, revision: updated.revision } } });
       return receipt(id, mutationId, saved);
     });
   }

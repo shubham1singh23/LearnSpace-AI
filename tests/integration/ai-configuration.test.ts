@@ -1,0 +1,31 @@
+import request from 'supertest';
+import { afterAll, expect, it } from 'vitest';
+import { providerDTOSchema } from '@learnspace/shared';
+import { createApp } from '../../apps/api/src/app.js';
+import { ConfigurationService, type AdapterFactory } from '../../apps/api/src/ai/configuration.js';
+import { createDatabase } from '../../apps/api/src/db.js';
+import { parseEnvironment } from '../../apps/api/src/config.js';
+
+const url = process.env.TEST_DATABASE_URL;
+if (!url || !/^learnspace_test(?:_[\w-]+)?$/.test(new URL(url).pathname.slice(1))) throw new Error('Separate TEST_DATABASE_URL required.');
+const db = createDatabase(url); const env = parseEnvironment({ DATABASE_URL: url });
+const ids: string[] = []; let calls = 0;
+const factory: AdapterFactory = () => ({ async generate(_system, _input, schema) { calls++; return schema.parse({ ok: true }); } });
+const service = new ConfigurationService(db, env, factory);
+const app = createApp(env, async () => ({ status: 'ok', service: 'learnspace-api', database: 'ready', storage: 'ready' }), undefined, db, undefined, service);
+const api = (method: 'get' | 'post' | 'put' | 'delete', path: string) => request(app)[method](`/api/v1${path}`).set('Host', '127.0.0.1:3001').set('Origin', 'http://127.0.0.1:3001');
+afterAll(async () => { await db.aiProviderConfiguration.deleteMany({ where: { id: { in: ids } } }); await db.$disconnect(); });
+it('persists only safe configuration, uses fake connection calls, guards revisions and loses session credentials on restart', async () => {
+  const input = { purpose: 'text', provider: 'openai', modelId: 'fixture-model', options: {}, credential: { source: 'session', secret: 'fixture-never-persist' } };
+  const created = await api('post', '/provider-configurations').send(input).expect(201); const row = providerDTOSchema.parse(created.body.data); ids.push(row.id);
+  expect(row.configured).toBe(true); expect(JSON.stringify(created.body)).not.toContain(input.credential.secret);
+  expect(JSON.stringify(await db.aiProviderConfiguration.findUnique({ where: { id: row.id } }))).not.toContain(input.credential.secret);
+  await api('post', `/provider-configurations/${row.id}/test`).send({}).expect(200); expect(calls).toBe(1);
+  const restarted = new ConfigurationService(db, env, factory); expect((await restarted.list()).find(config => config.id === row.id)?.configured).toBe(false);
+  await expect(restarted.resolve(row.id)).rejects.toMatchObject({ code: 'CREDENTIAL_REQUIRED' });
+  await api('put', `/provider-configurations/${row.id}`).send({ ...input, baseConfigRevision: 1, modelId: 'changed' }).expect(200);
+  await api('put', `/provider-configurations/${row.id}`).send({ ...input, baseConfigRevision: 1 }).expect(409);
+  await api('post', '/provider-configurations').send({ ...input, options: { baseUrl: 'https://evil.example' } }).expect(422);
+  await api('post', '/provider-configurations').send({ ...input, credential: { source: 'environment', envName: 'GOOGLE_API_KEY' } }).expect(422);
+  await api('delete', `/provider-configurations/${row.id}`).send({}).expect(204); expect(service.credentials.get(row.id, 2)).toBeUndefined();
+});

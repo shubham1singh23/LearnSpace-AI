@@ -8,14 +8,14 @@ import { assetSchema, type TiptapDocument } from '@learnspace/shared';
 import { manualExtensions, validatedEditorJSON, blankDocument } from './extensions';
 import { envelope } from '../api';
 
-interface Props { document: TiptapDocument; courseId: string; disabled: boolean; onChange: (document: TiptapDocument) => void; onValidity?: (invalid: boolean) => void; onReady?: (editor: Editor) => void }
-export function NotesEditor({ document, courseId, disabled, onChange, onValidity, onReady }: Props) {
+interface Props { document: TiptapDocument; courseId: string; disabled: boolean; label?: string; onChange: (document: TiptapDocument) => void; onValidity?: (invalid: boolean) => void; onReady?: (editor: Editor) => void }
+export function NotesEditor({ document, courseId, disabled, label = 'Lesson notes', onChange, onValidity, onReady }: Props) {
   const [message, setMessage] = useState('');
   const sequence = useRef(0);
   const [renderedSequence, setRenderedSequence] = useState(0);
   const [pendingImage, setPendingImage] = useState<{ id: string; width: number; height: number; alt: string; caption: string; position: number; sequence: number }>();
   const editor = useEditor({ extensions: manualExtensions, content: document, editable: !disabled,
-    editorProps: { attributes: { role: 'textbox', 'aria-label': 'Lesson notes', 'aria-multiline': 'true', 'aria-readonly': String(disabled) } },
+    editorProps: { attributes: { role: 'textbox', 'aria-label': label, 'aria-multiline': 'true', 'aria-readonly': String(disabled) } },
     onCreate: ({ editor }) => { onReady?.(editor); },
     onUpdate: ({ editor }) => {
       sequence.current++;

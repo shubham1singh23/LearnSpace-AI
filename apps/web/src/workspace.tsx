@@ -6,6 +6,10 @@ import { api, envelope, ApiError } from './api';
 import { PersistentNotes, type NotesHandle } from './editor/PersistentNotes';
 import { blankDocument } from './editor/extensions';
 import { leaveAfterSave } from './persistence/navigation';
+import { ModelSettings } from './ModelSettings';
+import { CourseOperations } from './OperationStatus';
+import { SyllabusStart } from './Syllabus';
+import { InitialGeneration } from './InitialGeneration';
 
 type Tree = z.infer<typeof treeSchema>;
 export function Workspace() {
@@ -13,6 +17,8 @@ export function Workspace() {
   const match = /^\/courses\/([a-f0-9-]+)(?:\/topics\/([a-f0-9-]+))?$/.exec(location.pathname);
   const courseId = match?.[1]; const topicId = match?.[2];
   const [courses, setCourses] = useState<Course[]>([]); const [tree, setTree] = useState<Tree>();
+  const [coursePreferences, setCoursePreferences] = useState(defaultPreferences);
+  const [startedOperation, setStartedOperation] = useState<{ courseId: string; id: string }>();
   const [lesson, setLesson] = useState<Lesson>();
   const [lessonAttempt, setLessonAttempt] = useState(0);
   const [lessonLoading, setLessonLoading] = useState(false);
@@ -87,9 +93,12 @@ export function Workspace() {
       {tree.prerequisites.filter(edge => edge.topicId === item.id).map(edge => <label key={edge.prerequisiteId}>Prerequisite: {tree.topics.find(topic => topic.id === edge.prerequisiteId)?.title}<select aria-label={`Prerequisite choice ${edge.prerequisiteId}`} value={edge.choice} onChange={event => void action(() => api(`/topics/${item.id}/prerequisites/${edge.prerequisiteId}`, envelope(edgeMutationSchema), 'PATCH', { choice: event.target.value }))}><option value="undecided">Undecided</option><option value="study">Study</option><option value="skip">Skip</option></select></label>)}
     </div>;
   }
-  return <div className="workspace"><aside><h1>LearnSpace AI</h1><p>Manual learning workspace</p><button onClick={() => { const title = window.prompt('Course title'); if (!title) return; const goal = window.prompt('Learning goal'); if (goal) void action(async () => { const result = await api('/courses', envelope(courseSchema), 'POST', { title, goal, preferences: defaultPreferences }); navigate(`/courses/${result.data.id}`); }); }}>New course</button><nav aria-label="Courses">{courses.map(course => <button key={course.id} aria-current={course.id === courseId ? 'page' : undefined} onClick={() => navigate(`/courses/${course.id}`)}>{course.title}</button>)}</nav>{courseId && tree && <><h2>Topics</h2><button onClick={() => addTopic(null)}>Add root topic</button>{renderTopics(null)}</>}</aside>
-    <main><a href="#notes">Skip to notes</a>{error && <div role="alert" className="notice">{error}<button onClick={refresh}>Reload tree</button></div>}
+  return <div className="workspace"><aside><h1>LearnSpace AI</h1><p>Manual learning workspace</p><button onClick={() => { const title = window.prompt('Course title'); if (!title) return; const goal = window.prompt('Learning goal'); if (goal) void action(async () => { const result = await api('/courses', envelope(courseSchema), 'POST', { title, goal, preferences: coursePreferences }); navigate(`/courses/${result.data.id}`); }); }}>New course</button><nav aria-label="Courses">{courses.map(course => <button key={course.id} aria-current={course.id === courseId ? 'page' : undefined} onClick={() => navigate(`/courses/${course.id}`)}>{course.title}</button>)}</nav>{courseId && tree && <><h2>Topics</h2><button onClick={() => addTopic(null)}>Add root topic</button>{renderTopics(null)}</>}</aside>
+    <main><ModelSettings onPreferences={setCoursePreferences} /><a href="#notes">Skip to notes</a>{error && <div role="alert" className="notice">{error}<button onClick={refresh}>Reload tree</button></div>}
       {!courseId && <h2>Create a course to start your notes.</h2>}
+      {courseId && <CourseOperations key={courseId} courseId={courseId} startedId={startedOperation?.courseId === courseId ? startedOperation.id : undefined} />}
+      {courseId && tree && !tree.topics.length && <SyllabusStart key={courseId} courseId={courseId} treeRevision={tree.treeRevision} onStarted={id => setStartedOperation({ courseId, id })} />}
+      {courseId && topic?.isLeaf && !lesson && !lessonLoading && <InitialGeneration key={topic.id} topicId={topic.id} onStarted={id => setStartedOperation({ courseId, id })} onLesson={setLesson} />}
       {courseId && !topic && <h2>{courses.find(course => course.id === courseId)?.title ?? 'Course'}</h2>}
       {courseId && tree && <details><summary>Course settings</summary><button onClick={() => { const title = window.prompt('Course title', courses.find(course => course.id === courseId)?.title); if (title) void action(() => api(`/courses/${courseId}`, envelope(courseSchema), 'PATCH', { baseTreeRevision: tree.treeRevision, title })); }}>Rename course</button><button onClick={() => { if (window.confirm(`Delete this course, ${tree.topics.length} topic(s), and ${tree.topics.filter(topic => topic.lessonId).length} saved lesson(s)?`)) void destructive(async () => { await api(`/courses/${courseId}`, z.undefined(), 'DELETE', { baseTreeRevision: tree.treeRevision, confirm: true }); navigate('/'); }); }}>Delete course</button></details>}
       {topic && <><h2>{topic.title}</h2>{topicControls(topic)}{topic.isLeaf && !lesson && <><button disabled={lessonLoading} onClick={() => void action(async () => { const result = await api(`/topics/${topic.id}/lessons`, envelope(lessonSchema), 'POST', { mutationId: crypto.randomUUID(), documentSchemaVersion: 1, document: blankDocument() }); setLesson(result.data);  })}>Create blank notes</button><button disabled={lessonLoading} onClick={() => setLessonAttempt(value => value + 1)}>Retry loading notes</button>{lessonLoading && <p role="status">Loading saved notes…</p>}</>}</>}
