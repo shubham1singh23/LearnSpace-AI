@@ -1,5 +1,8 @@
 import { Extension } from '@tiptap/core';
 import { Plugin } from '@tiptap/pm/state';
+import { Mapping } from '@tiptap/pm/transform';
+import { acceptanceBarrierPlugin, documentSequencePlugin } from './selection-plugin';
+import { readingPlugin } from '../learning/presentation';
 import { history, undo, redo } from '@tiptap/pm/history';
 import { baseKeymap } from '@tiptap/pm/commands';
 import { keymap } from '@tiptap/pm/keymap';
@@ -9,19 +12,27 @@ import { documentExtensions, editorJSON, tiptapDocumentSchema } from '@learnspac
 export const editorBehavior = Extension.create({
   name: 'manualEditorBehavior',
   addProseMirrorPlugins() {
-    return [history(), keymap({
+    return [history(), documentSequencePlugin, acceptanceBarrierPlugin, readingPlugin, keymap({
       'Mod-z': undo, 'Mod-Shift-z': redo, 'Mod-y': redo,
       Enter: splitListItem(this.editor.schema.nodes.listItem!),
       Tab: sinkListItem(this.editor.schema.nodes.listItem!),
       'Shift-Tab': liftListItem(this.editor.schema.nodes.listItem!)
     }), keymap(baseKeymap), new Plugin({
-      appendTransaction(transactions, _old, state) {
+      appendTransaction(transactions, old, state) {
         if (!transactions.some(transaction => transaction.docChanged)) return null;
+        const mapping = new Mapping(); for (const transaction of transactions) mapping.appendMapping(transaction.mapping);
+        const owners = new Map<string, number>();
+        old.doc.descendants((node, position) => {
+          const id: unknown = node.attrs.blockId;
+          if (typeof id !== 'string') return;
+          const mapped = mapping.mapResult(position, 1);
+          if (!mapped.deleted && state.doc.nodeAt(mapped.pos)?.attrs.blockId === id) owners.set(id, mapped.pos);
+        });
         const ids = new Set<string>(); const tr = state.tr;
         state.doc.descendants((node, position) => {
           if (!('blockId' in node.attrs)) return;
           const id: unknown = node.attrs.blockId;
-          if (typeof id !== 'string' || ids.has(id)) {
+          if (typeof id !== 'string' || ids.has(id) || owners.has(id) && owners.get(id) !== position) {
             const fresh = crypto.randomUUID(); ids.add(fresh);
             tr.setNodeMarkup(position, undefined, { ...node.attrs, blockId: fresh });
           } else ids.add(id);

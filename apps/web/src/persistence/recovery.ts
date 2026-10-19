@@ -1,13 +1,16 @@
 import { z } from 'zod';
-import { idSchema, revisionSchema, saveLessonSchema, tiptapDocumentSchema } from '@learnspace/shared';
+import { canonicalJSON, chatStartJournalSchema, idSchema, insertionIsolationSchema, revisionSchema, saveLessonSchema, tiptapDocumentSchema, type ChatStartJournal } from '@learnspace/shared';
 
 export const recoverySchema = z.object({
   lessonId: idSchema, topicId: idSchema, baseRevision: revisionSchema,
   sequence: z.number().int().nonnegative(), acknowledged: z.number().int().nonnegative(),
   document: tiptapDocumentSchema, updatedAt: z.string(),
+  isolation: insertionIsolationSchema.optional(),
   inFlight: z.object({ body: saveLessonSchema, sequence: z.number().int().positive() }).strict().optional()
 }).strict().superRefine((draft, context) => {
   if (draft.acknowledged > draft.sequence || draft.inFlight && (draft.inFlight.sequence <= draft.acknowledged || draft.inFlight.sequence > draft.sequence || draft.inFlight.body.baseRevision !== draft.baseRevision)) context.addIssue({ code: 'custom', message: 'Inconsistent recovery sequence or revision.' });
+  if (draft.isolation && (!draft.inFlight || draft.inFlight.body.aiOperationId || draft.inFlight.body.imageOperationId)) context.addIssue({ code: 'custom', message: 'Local insertion requires its isolated manual request.' });
+  if ((draft.inFlight?.body.aiOperationId || draft.isolation) && draft.inFlight && (draft.sequence !== draft.inFlight.sequence || canonicalJSON(draft.document) !== canonicalJSON(draft.inFlight.body.document))) context.addIssue({ code: 'custom', message: 'Acceptance recovery must preserve its exact immutable document.' });
 });
 export type RecoveryDraft = z.infer<typeof recoverySchema>;
 export interface RecoveryStore { get(id: string): Promise<RecoveryDraft | undefined>; put(draft: RecoveryDraft): Promise<void>; remove(id: string): Promise<void> }
@@ -40,4 +43,10 @@ export class IndexedDBRecovery implements RecoveryStore {
   }
   async put(draft: RecoveryDraft) { await this.run('readwrite', store => store.put({ lessonId: this.key(draft.lessonId), draft: recoverySchema.parse(draft) })); }
   async remove(id: string) { await this.run('readwrite', store => store.delete(this.key(id))); }
+  async getChatStart(id: string) {
+    const value: unknown = await this.run('readonly', store => store.get(this.key(`chat-start:${id}`)));
+    return value === undefined ? undefined : z.object({ lessonId: z.string(), journal: chatStartJournalSchema }).strict().parse(value).journal;
+  }
+  async putChatStart(journal: ChatStartJournal) { await this.run('readwrite', store => store.put({ lessonId: this.key(`chat-start:${journal.lessonId}`), journal: chatStartJournalSchema.parse(journal) })); }
+  async removeChatStart(id: string) { await this.run('readwrite', store => store.delete(this.key(`chat-start:${id}`))); }
 }

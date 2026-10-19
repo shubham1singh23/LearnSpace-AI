@@ -6,11 +6,15 @@ import { HttpError } from '../errors.js';
 import { TreeService, courseDTO } from './tree-service.js';
 import { lockCourse, transaction } from './transactions.js';
 import { LessonService } from './lesson-service.js';
+import { ProgressService } from './progress-service.js';
 
 export function workspaceRouter(db: Database) {
   const router = Router();
   const service = new TreeService(db);
   const lessons = new LessonService(db);
+  const progress = new ProgressService(db);
+  router.get('/courses/:id/progress', async (req, res) => { res.json({ data: await progress.read(idSchema.parse(req.params.id)), requestId: res.locals.requestId }); });
+  router.patch('/topics/:id/progress', async (req, res) => { res.json({ data: await progress.patch(idSchema.parse(req.params.id), req.body), requestId: res.locals.requestId }); });
   router.get('/topics/:id/lesson', async (req, res) => { res.json({ data: await lessons.load(idSchema.parse(req.params.id)), requestId: res.locals.requestId }); });
   router.post('/topics/:id/lessons', async (req, res) => { res.status(201).json({ data: await lessons.create(idSchema.parse(req.params.id), createLessonSchema.parse(req.body)), requestId: res.locals.requestId }); });
   router.put('/lessons/:id', async (req, res) => { res.json({ data: await lessons.save(idSchema.parse(req.params.id), saveLessonSchema.parse(req.body)), requestId: res.locals.requestId }); });

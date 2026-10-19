@@ -12,6 +12,34 @@ const receipt = (id: string, body: SaveLesson, revision: number) => ({ id, mutat
 const queues: Autosave[] = [];
 afterEach(() => { queues.forEach(queue => queue.stop()); queues.length = 0; vi.useRealTimers(); });
 describe('Phase 6 autosave and IndexedDB gate', () => {
+  it('keeps manual chat insertions isolated, journaled and immutable after lost acknowledgements and refresh', async () => {
+    const value = lesson(); const store = new IndexedDBRecovery(); const bodies: SaveLesson[] = [];
+    const queue = new Autosave(value, store, async body => { bodies.push(body); throw new TypeError('Lost insertion acknowledgement'); }, () => undefined, async () => undefined); queues.push(queue);
+    const candidate = document('Inserted answer'); const isolation = { kind: 'chat_insert' as const, sourceId: crypto.randomUUID(), sourceHash: 'a'.repeat(64) };
+    await expect(queue.insertText(isolation, candidate, () => { queue.edit(candidate); expect(queue.isolatedPending).toBe(true); })).rejects.toThrow('Lost insertion');
+    expect(bodies).toHaveLength(3); expect(bodies[0]?.aiOperationId).toBeUndefined(); expect(bodies[0]?.imageOperationId).toBeUndefined();
+    const draft = await store.get(value.id); expect(draft?.isolation).toEqual(isolation); expect(draft?.inFlight?.body).toEqual(bodies[0]);
+    await expect(queue.overwriteAt(3)).rejects.toThrow('manual overwrite'); expect(() => queue.edit(document('Typing'))).toThrow('isolated');
+    const replayed: SaveLesson[] = []; const recovered = new Autosave({ ...value, revision: 2 }, store, async body => { replayed.push(body); return receipt(value.id, body, 2); }, () => undefined); queues.push(recovered); recovered.recover(draft!);
+    expect(recovered.isolatedPending).toBe(true); await recovered.flush(); expect(replayed).toEqual([bodies[0]]); expect(recovered.isolatedPending).toBe(false);
+  });
+  it('journals isolated acceptance before dispatch, excludes typing and replays the exact AI request after refresh', async () => {
+    const value = lesson(); const store = new IndexedDBRecovery(); const bodies: SaveLesson[] = []; const order: string[] = [];
+    const queue = new Autosave(value, store, async body => { order.push('http'); bodies.push(body); throw new TypeError('Lost AI acknowledgement'); }, () => undefined, async () => undefined); queues.push(queue);
+    const candidate = document('Accepted fragment'); const operationId = crypto.randomUUID();
+    await expect(queue.acceptEdit(operationId, candidate, () => { order.push('dispatch'); queue.edit(candidate); expect(() => queue.edit(document('New typing'))).toThrow('isolated'); })).rejects.toThrow('Lost AI');
+    expect(order[0]).toBe('dispatch'); expect(bodies).toHaveLength(3); expect(bodies.every(body => body.aiOperationId === operationId && body.mutationId === bodies[0]!.mutationId)).toBe(true);
+    await expect(queue.overwriteAt(2)).rejects.toThrow('manual overwrite'); await expect(queue.discard()).rejects.toThrow('outcome');
+    const draft = await store.get(value.id); expect(draft?.inFlight?.body).toEqual(bodies[0]);
+    const replayed: SaveLesson[] = []; const next = new Autosave({ ...value, revision: 2 }, store, async body => { replayed.push(body); return receipt(value.id, body, 2); }, () => undefined); queues.push(next); next.recover(draft!);
+    expect(next.isolatedPending).toBe(true); expect(() => next.edit(document('Manual downgrade'))).toThrow('isolated'); await next.flush(); expect(replayed).toEqual([bodies[0]]); expect(next.isolatedPending).toBe(false); expect(next.currentRevision).toBe(2);
+  });
+  it('does not dispatch or send acceptance when the mandatory recovery journal fails', async () => {
+    const value = lesson(); let dispatched = false; let calls = 0;
+    const queue = new Autosave(value, { get: async () => undefined, put: async () => { throw new Error('Quota'); }, remove: async () => undefined }, async body => { calls++; return receipt(value.id, body, 2); }, () => undefined); queues.push(queue);
+    await expect(queue.acceptEdit(crypto.randomUUID(), document('Proposal'), () => { dispatched = true; })).rejects.toThrow('Quota');
+    expect(dispatched).toBe(false); expect(calls).toBe(0); expect(queue.snapshot).toEqual(value.document); expect(queue.dirty).toBe(false);
+  });
   it('coalesces pending edits, serializes saves, and drains typing that arrives during an in-flight save', async () => {
     const value = lesson(); const first = deferred<ReturnType<typeof receipt>>(); const started = deferred<void>();
     const bodies: SaveLesson[] = []; let active = 0; let maximum = 0;

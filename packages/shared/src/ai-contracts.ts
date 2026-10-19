@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { idSchema, revisionSchema, treeRevisionSchema, preferencesSchema } from './base-contracts.js';
 import { tiptapDocumentSchema } from './document.js';
+import { preparedEditSchema } from './edit-contracts.js';
 
 export const textProviderSchema = z.enum(['openai', 'anthropic', 'google', 'ollama']);
 export const providerOptionsSchema = z.object({
@@ -74,10 +75,12 @@ export const educationalLessonSchema = z.object({ title: z.string().min(1).max(2
   if (!lesson.sections.some(section => section.blocks.some(block => block.type === 'example'))) ctx.addIssue({ code: 'custom', message: 'A worked example is required' });
   for (const section of lesson.sections) for (const block of section.blocks) if (block.type === 'table' && block.rows.some(row => row.length !== block.headers.length)) ctx.addIssue({ code: 'custom', message: 'Tables must be rectangular' });
 });
-export const operationKindSchema = z.enum(['syllabus', 'initial_lesson', 'regeneration']);
+export const operationKindSchema = z.enum(['syllabus', 'initial_lesson', 'regeneration', 'edit', 'chat']);
 export const operationStatusSchema = z.enum(['pending', 'running', 'ready', 'applied', 'rejected', 'failed', 'cancelled', 'interrupted', 'expired']);
-export const contextManifestSchema = z.object({ sources: z.array(z.object({ lessonId: idSchema, revision: revisionSchema, blockIds: z.array(idSchema) }).strict()).max(4), omitted: z.boolean() }).strict();
+export const contextManifestSchema = z.object({ sources: z.array(z.object({ lessonId: idSchema, revision: revisionSchema, blockIds: z.array(idSchema) }).strict()).max(4), omitted: z.boolean(), chat: z.object({ algorithm: z.literal('chat-v1'), treeRevision: treeRevisionSchema, historyMessageIds: z.array(idSchema).max(12), selectedBlockIds: z.array(idSchema).max(100), omissions: z.array(z.enum(['budget', 'unsupported_media', 'missing_prerequisite', 'history_limit'])).max(4), contextHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict().optional() }).strict();
 export const operationResultSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('applied_chat'), lessonId: idSchema, turnId: idSchema, messageId: idSchema, contextRevision: revisionSchema }).strict(),
+  z.object({ type: z.literal('edit'), readyAt: z.iso.datetime(), prepared: preparedEditSchema }).strict(),
   z.object({ type: z.literal('syllabus'), readyAt: z.iso.datetime(), draft: syllabusDraftSchema }).strict(),
   z.object({ type: z.literal('lesson'), readyAt: z.iso.datetime(), documentSchemaVersion: z.literal(1), document: tiptapDocumentSchema, contentHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict(),
   z.object({ type: z.literal('applied_lesson'), lessonId: idSchema, revision: revisionSchema }).strict(),

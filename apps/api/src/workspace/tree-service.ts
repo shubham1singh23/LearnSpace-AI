@@ -53,6 +53,7 @@ export class TreeService {
       if (topics.length >= 2000) throw new HttpError(422, 'TREE_LIMIT', 'Course topic limit reached.');
       parentCheck(topics, input.parentId);
       if (input.parentId && await tx.lesson.count({ where: { topicId: input.parentId } })) throw new HttpError(409, 'LEAF_HAS_LESSON', 'Use Wrap to preserve this lesson before adding children.');
+      if (input.parentId && await tx.learningProgress.count({ where: { topicId: input.parentId } })) throw new HttpError(409, 'LEAF_HAS_PROGRESS', 'Use Wrap to preserve this leaf progress before adding children.');
       const siblings = topics.filter(topic => topic.parentId === input.parentId);
       if (input.position > siblings.length) throw new HttpError(422, 'INVALID_ORDER', 'Position exceeds sibling count.');
       await park(tx, topics);
@@ -77,6 +78,7 @@ export class TreeService {
       if (!topic) throw new HttpError(404, 'NOT_FOUND', 'Topic not found.');
       parentCheck(topics, input.newParentId);
       if (input.newParentId && await tx.lesson.count({ where: { topicId: input.newParentId } })) throw new HttpError(409, 'LEAF_HAS_LESSON', 'Use Wrap to preserve this lesson before adding children.');
+      if (input.newParentId && await tx.learningProgress.count({ where: { topicId: input.newParentId } })) throw new HttpError(409, 'LEAF_HAS_PROGRESS', 'Use Wrap to preserve this leaf progress before adding children.');
       let ancestor = input.newParentId;
       while (ancestor) {
         if (ancestor === topic.id) throw new HttpError(422, 'TREE_CYCLE', 'A topic cannot be moved beneath itself.');

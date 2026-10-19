@@ -16,7 +16,10 @@ const factory: AdapterFactory = () => ({ async generate(system, input, schema, s
   if (input.includes('slow fixture')) await new Promise<void>((done, reject) => { const timer = setTimeout(done, 1500); signal.addEventListener('abort', () => { clearTimeout(timer); reject(new ModelError('CANCELLED')); }, { once: true }); });
   if (signal.aborted) throw new ModelError('CANCELLED');
   if (input.includes('invalid fixture')) throw new ModelError('INVALID_OUTPUT');
-  const result: unknown = system.includes('Create a syllabus only') ? {
+  const editing = system.includes('Perform only the requested selection action:');
+  const action = /selection action: (\w+)/.exec(system)?.[1];
+  const editOutput = system.includes('insert_blocks') ? { fragment: { kind: 'insert_blocks', blocks: [{ type: action === 'example' || action === 'analogy' ? action : 'paragraph', text: 'Proposed selection content.' }] } } : system.includes('block_texts') ? { fragment: { kind: 'block_texts', items: Array.from({ length: Number(/exactly (\d+) items/.exec(system)?.[1] ?? 1) }, () => ({ text: 'Proposed selection content.' })) } } : { fragment: { kind: 'inline', text: 'Proposed selection content.' } };
+  const result: unknown = system.includes('You are a lesson tutor.') ? { text: 'A complete plain-text tutoring answer.\nPractice with your saved notes.' } : editing ? editOutput : system.includes('Create a syllabus only') ? {
     nodes: [{ tempId: 'module', parentTempId: null, title: 'Foundations', kind: 'module', position: 0, objectives: [] }, { tempId: 'leaf', parentTempId: 'module', title: 'Counting practice', kind: 'topic', position: 0, objectives: ['Add two numbers'] }], prerequisites: []
   } : {
     title: system.includes('Propose a complete replacement') ? 'Replacement counting lesson' : 'Counting lesson', objectives: ['Add two numbers'], prerequisiteNotes: [],

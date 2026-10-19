@@ -4,10 +4,23 @@ import { connectionTestSchema, idSchema, providerUpdateSchema } from '@learnspac
 import type { ConfigurationService } from './configuration.js';
 import type { OperationService } from './operations.js';
 import { GenerationService } from './generation.js';
+import { EditService } from './edit-service.js';
+import { ChatService } from './chat-service.js';
 
 export function aiRouter(service: ConfigurationService, operations: OperationService) {
   const router = Router();
   const generation = new GenerationService(operations);
+  const edits = new EditService(operations);
+  const chat = new ChatService(operations);
+  router.get('/lessons/:id/messages', async (req, res) => { res.json({ data: await chat.messages(idSchema.parse(req.params.id), req.query), requestId: res.locals.requestId }); });
+  router.post('/lessons/:id/chat-turns', async (req, res) => {
+    const operation = await chat.start(idSchema.parse(req.params.id), idSchema.parse(req.header('Idempotency-Key')), req.body);
+    res.status(202).json({ data: { operationId: operation.id, status: operation.status, eventsUrl: `/api/v1/operations/${operation.id}/events` }, requestId: res.locals.requestId });
+  });
+  router.post('/lessons/:id/edits', async (req, res) => {
+    const operation = await edits.start(idSchema.parse(req.params.id), idSchema.parse(req.header('Idempotency-Key')), req.body);
+    res.status(202).json({ data: { operationId: operation.id, status: operation.status, eventsUrl: `/api/v1/operations/${operation.id}/events` }, requestId: res.locals.requestId });
+  });
   router.post('/lessons/:id/regenerations', async (req, res) => {
     const operation = await generation.regenerate(idSchema.parse(req.params.id), idSchema.parse(req.header('Idempotency-Key')), req.body);
     res.status(202).json({ data: { operationId: operation.id, status: operation.status, eventsUrl: `/api/v1/operations/${operation.id}/events` }, requestId: res.locals.requestId });

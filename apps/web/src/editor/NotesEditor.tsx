@@ -1,6 +1,6 @@
 import { useEditor, EditorContent, type Editor } from '@tiptap/react';
 import type { JSONContent } from '@tiptap/core';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { NodeSelection } from '@tiptap/pm/state';
 import { wrapInList } from '@tiptap/pm/schema-list';
 import { undo, redo } from '@tiptap/pm/history';
@@ -10,13 +10,13 @@ import { envelope } from '../api';
 
 interface Props { document: TiptapDocument; courseId: string; disabled: boolean; label?: string; onChange: (document: TiptapDocument) => void; onValidity?: (invalid: boolean) => void; onReady?: (editor: Editor) => void }
 export function NotesEditor({ document, courseId, disabled, label = 'Lesson notes', onChange, onValidity, onReady }: Props) {
+  const notifyReady = useEffectEvent((value: Editor) => onReady?.(value));
   const [message, setMessage] = useState('');
   const sequence = useRef(0);
   const [renderedSequence, setRenderedSequence] = useState(0);
   const [pendingImage, setPendingImage] = useState<{ id: string; width: number; height: number; alt: string; caption: string; position: number; sequence: number }>();
   const editor = useEditor({ extensions: manualExtensions, content: document, editable: !disabled,
     editorProps: { attributes: { role: 'textbox', 'aria-label': label, 'aria-multiline': 'true', 'aria-readonly': String(disabled) } },
-    onCreate: ({ editor }) => { onReady?.(editor); },
     onUpdate: ({ editor }) => {
       sequence.current++;
       setRenderedSequence(sequence.current);
@@ -24,6 +24,7 @@ export function NotesEditor({ document, courseId, disabled, label = 'Lesson note
       catch { onValidity?.(true); setMessage('This structure cannot be saved. Undo or correct it; your editor content is retained.'); }
     }
   });
+  useEffect(() => { if (editor) notifyReady(editor); }, [editor]);
   useEffect(() => {
     if (!editor) return;
     editor.setEditable(!disabled, false);

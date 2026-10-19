@@ -4,6 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { afterAll, expect, it } from 'vitest';
 import { defaultPreferences } from '@learnspace/shared';
 import { createDatabase } from '../../apps/api/src/db.js';
+import { LessonService } from '../../apps/api/src/workspace/lesson-service.js';
 const url = process.env.TEST_DATABASE_URL;
 if (!url || !/^learnspace_test(?:_[\w-]+)?$/.test(new URL(url).pathname.slice(1))) throw new Error('Separate TEST_DATABASE_URL required.');
 const db = createDatabase(url); const origin = 'http://127.0.0.1:3104'; let server: ChildProcess | undefined;
@@ -25,5 +26,12 @@ it('a real process restart interrupts an expired durable execution without gener
     await db.aiOperation.update({ where: { id: started.data.operationId }, data: { leaseUntil: new Date(0) } });
     await start(); const status = await (await fetch(`${origin}/api/v1/operations/${started.data.operationId}`)).json() as { data: { status: string } }; expect(status.data.status).toBe('interrupted');
     expect(await db.lesson.count({ where: { topicId: topic.id } })).toBe(0); expect(await db.modelUsage.count({ where: { operationId: started.data.operationId } })).toBe(0);
+    const lesson = await new LessonService(db).create(topic.id, { mutationId: randomUUID(), documentSchemaVersion: 1, document: { type: 'doc', content: [{ type: 'paragraph', attrs: { blockId: randomUUID() }, content: [{ type: 'text', text: 'Saved notes' }] }] } });
+    const chat = await fetch(`${origin}/api/v1/lessons/${lesson.id}/chat-turns`, { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() }, body: JSON.stringify({ baseRevision: 1, message: 'slow fixture', clientTurnId: randomUUID() }) }); expect(chat.status).toBe(202);
+    const turn = await chat.json() as { data: { operationId: string } }; await stop();
+    await db.aiOperation.update({ where: { id: turn.data.operationId }, data: { leaseUntil: new Date(0) } });
+    await start(); const resumed = await (await fetch(`${origin}/api/v1/operations/${turn.data.operationId}`)).json() as { data: { status: string } }; expect(resumed.data.status).toBe('interrupted');
+    expect(await db.chatMessage.findMany({ where: { lessonId: lesson.id } })).toMatchObject([{ role: 'user', status: 'interrupted' }]);
+    expect(await db.modelUsage.count({ where: { operationId: turn.data.operationId } })).toBe(0); expect((await db.lesson.findUniqueOrThrow({ where: { id: lesson.id } })).revision).toBe(1);
   } finally { await stop(); await db.lesson.deleteMany({ where: { topicId: topic.id } }); await db.course.delete({ where: { id: course.id } }); if (original) await db.workspaceSettings.update({ where: { id: 1 }, data: { textConfigId: original.textConfigId } }); await db.aiProviderConfiguration.delete({ where: { id: config.id } }); }
 });
